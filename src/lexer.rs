@@ -9,7 +9,9 @@ enum GetCharStatus {
 }
 
 const LEGAL_PUNCTUATION: &'static [char] =
-  &['\\', '-', '>', '<', '+', '-', '*', '/', '!', '(', ')'];
+  &['\\', '-', '>', '<', '+', '-', '*',
+    '/', '!', '(', ')', '#', '|', '&',
+    '='];
 
 #[derive(Debug)]
 pub struct Lexer {
@@ -35,6 +37,10 @@ impl Lexer {
 
   pub fn cnt(&self) -> usize {
     self.cnt
+  }
+
+  pub fn get_tokens(&self) -> &Vec<Token> {
+    &self.tokens
   }
 
   pub fn dump(&self) {
@@ -73,6 +79,20 @@ impl Lexer {
     }
   }
 
+  fn handle_comment(&mut self, idx: &mut usize) -> Result<String, String> {
+    loop {
+      *idx += 1;
+      match self.get_ch(*idx) {
+        Ok(ch) => {
+          if ch == '\n' { break; }
+        }
+        Err(GetCharStatus::EOF(_)) => { break; }
+        Err(GetCharStatus::OOB(msg)) => { panic!("{msg}"); }
+      }
+    }
+    Ok(String::from("eat all comments"))
+  }
+
   fn handle_var(&mut self, idx: &mut usize) -> Result<String, String> {
     let mut tok = String::new();
     loop {
@@ -97,7 +117,7 @@ impl Lexer {
   fn handle_keyword(&mut self, idx: &mut usize) -> Result<String, String> {
     let mut tok = String::new();
     let mut last_ch = 0 as char;
-    let ch0 = 0 as char;
+    const CH0: char = 0 as char;
     loop {
       match self.get_ch(*idx) {
         Ok(ch) => {
@@ -112,7 +132,7 @@ impl Lexer {
               break;
             }
             '-' | '<' | '!' => {
-              if last_ch != ch0 {
+              if last_ch != CH0 {
                 break;
               }
               tok.push(ch);
@@ -126,29 +146,57 @@ impl Lexer {
               }
             }
             '+' | '*' | '/' => {
-              if last_ch != ch0 {
+              if last_ch != CH0 {
                 return Err(format!("i: {:?}, expect non-keyword before '{ch}'", *idx));
               }
               tok.push(ch);
               *idx += 1;
               break;
             }
+            '&' | '|' => {
+              if last_ch != CH0 {
+                return Err(format!("i: {:?}, expect non-keyword before '{ch}'", *idx));
+              }
+              tok.push(ch);
+              *idx += 1;
+              match self.get_ch(*idx) {
+                Ok(nch) => {
+                  if ch == nch {
+                    tok.push(nch);
+                    *idx += 1;
+                    break;
+                  } else {
+                    return Err(format!("i:  {:?}, expect '{ch}' rather than '{nch}'", *idx));
+                  }
+                }
+                Err(GetCharStatus::EOF(_)) => {
+                  return Err(format!("i: {:?}, expect '{ch}' but reached EOF", *idx));
+                }
+                Err(GetCharStatus::OOB(msg)) => {
+                  return Err(msg);
+                }
+              }
+            }
             '=' => {
               tok.push(ch);
               *idx += 1;
               match last_ch {
+                CH0 => { continue; }
                 '=' | '>' | '<' | '!' => { break; }
-                _ => {}
-              }
-              if last_ch != ch0 {
-                *idx -= 1;
-                return Err(format!("i: {:?}, expect non-keyword or ('=' | '>' | '<' | '!') before '{ch}'", *idx));
+                _ => {
+                  *idx -= 1;
+                  return Err(format!("i: {:?}, expect non-keyword or ('=' | '>' | '<' | '!') before '{ch}'", *idx));
+                }
               }
             }
             '(' | ')' => {
+              if last_ch != CH0 { break; }
               tok.push(ch);
               *idx += 1;
               break;
+            }
+            '#' => {
+              return self.handle_comment(idx);
             }
             _ => {
               return Err(format!("i: {:?}, illegal character {ch}", *idx));
